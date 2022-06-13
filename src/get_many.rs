@@ -1,5 +1,7 @@
 // Copyright 2021-2022 System76 <info@system76.com>
 // SPDX-License-Identifier: MPL-2.0
+#[cfg(feature = "isahc")]
+use http::Request;
 
 use crate::get::FetchLocation;
 use crate::*;
@@ -52,9 +54,15 @@ pub async fn get_many<Data: Send + Sync + 'static>(
                     let range = range::to_string(range_start, Some(range_end));
                     let part_path: Arc<Path> = Arc::from(part_path);
 
+                    #[cfg(feature = "isahc")]
+                    let request = Request::get(&*uri).header("range", range.as_str());
+
+                    #[cfg(feature = "reqwest")]
+                    let request = fetcher.client.get(&*uri).header("range", range.as_str());
+
                     crate::get(
                         fetcher.clone(),
-                        Request::get(&*uri).header("range", range.as_str()),
+                        request,
                         FetchLocation::create(part_path.clone(), false).await?,
                         to.clone(),
                         extra.clone(),
