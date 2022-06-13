@@ -69,20 +69,11 @@ use futures::{
     prelude::*,
     stream::{self, StreamExt},
 };
-#[cfg(feature = "isahc")]
-use http::Request;
+
 use http::StatusCode;
 use httpdate::HttpDate;
-#[cfg(feature = "isahc")]
-use isahc::config::RedirectPolicy;
-#[cfg(feature = "isahc")]
-use isahc::AsyncBody;
-#[cfg(feature = "isahc")]
-use isahc::{HttpClient as Client, Response};
 use numtoa::NumToA;
-#[cfg(feature = "reqwest")]
 use reqwest::redirect::Policy;
-#[cfg(feature = "reqwest")]
 use reqwest::{Client, Response};
 
 use std::sync::atomic::Ordering;
@@ -108,10 +99,6 @@ pub type EventSender<Data> = mpsc::UnboundedSender<(Arc<Path>, Data, FetchEvent)
 pub enum Error {
     #[error("task was canceled")]
     Canceled,
-    #[cfg(feature = "isahc")]
-    #[error("http client error")]
-    Client(#[source] isahc::Error),
-    #[cfg(feature = "reqwest")]
     #[error("http client error")]
     Client(#[source] reqwest::Error),
     #[error("unable to concatenate fetched parts")]
@@ -146,14 +133,6 @@ pub enum Error {
     TokioSpawn(#[source] tokio::task::JoinError),
 }
 
-#[cfg(feature = "isahc")]
-impl From<isahc::Error> for Error {
-    fn from(e: isahc::Error) -> Self {
-        Self::Client(e)
-    }
-}
-
-#[cfg(feature = "reqwest")]
 impl From<reqwest::Error> for Error {
     fn from(e: reqwest::Error) -> Self {
         Self::Client(e)
@@ -236,22 +215,13 @@ pub struct Fetcher<Data> {
 
 impl<Data> Default for Fetcher<Data> {
     fn default() -> Self {
-        #[cfg(feature = "isahc")]
-        use isahc::config::Configurable;
         let client_builder = Client::builder()
             // Keep a TCP connection alive for up to 90s
             .tcp_keepalive(Duration::from_secs(90));
 
         // Follow up to 10 redirect links
         // Allow the server to be eager about sending packets
-        #[cfg(feature = "isahc")]
-        let client_builder = client_builder
-            .redirect_policy(RedirectPolicy::Limit(10))
-            .tcp_nodelay()
-            // Cache DNS records for 24 hours
-            .dns_cache(Duration::from_secs(60 * 60 * 24));
 
-        #[cfg(feature = "reqwest")]
         let client_builder = client_builder
             .redirect(Policy::limited(10))
             .tcp_nodelay(true);
@@ -407,15 +377,6 @@ impl<Data: Send + Sync + 'static> Fetcher<Data> {
                 if let Error::Client(ref error) = error {
                     use std::error::Error;
                     if let Some(source) = error.source() {
-                        #[cfg(feature = "isahc")]
-                        if let Some(error) = source.downcast_ref::<isahc::Error>() {
-                            if error.is_network() {
-                                error!("retrying due to connection error: {}", error);
-                                continue;
-                            }
-                        }
-
-                        #[cfg(feature = "reqwest")]
                         if let Some(error) = source.downcast_ref::<reqwest::Error>() {
                             if error.is_connect() || error.is_request() {
                                 error!("retrying due to connection error: {}", error);
@@ -543,9 +504,6 @@ impl<Data: Send + Sync + 'static> Fetcher<Data> {
             }
         }
 
-        #[cfg(feature = "isahc")]
-        let mut request = Request::get(&*uris[0]);
-        #[cfg(feature = "reqwest")]
         let mut request = client.get(&*uris[0]);
 
         if resume != 0 {
@@ -572,9 +530,6 @@ impl<Data: Send + Sync + 'static> Fetcher<Data> {
 
             // Server does not support if-modified-since
             Err(Error::Status(StatusCode::NOT_IMPLEMENTED)) => {
-                #[cfg(feature = "isahc")]
-                let request = Request::get(&*uris[0]);
-                #[cfg(feature = "reqwest")]
                 let request = client.get(&*uris[0]);
 
                 let (path, _) = crate::get(
@@ -607,19 +562,6 @@ impl<Data: Send + Sync + 'static> Fetcher<Data> {
     }
 }
 
-#[cfg(feature = "isahc")]
-async fn head(client: &Client, uri: &str) -> Result<Option<Response<AsyncBody>>, Error> {
-    let request = Request::head(uri).body(()).unwrap();
-
-    match validate(client.send_async(request).await?).map(Some) {
-        result @ Ok(_) => result,
-        Err(Error::Status(StatusCode::NOT_MODIFIED))
-        | Err(Error::Status(StatusCode::NOT_IMPLEMENTED)) => Ok(None),
-        Err(other) => Err(other),
-    }
-}
-
-#[cfg(feature = "reqwest")]
 async fn head(client: &Client, uri: &str) -> Result<Option<Response>, Error> {
     let request = client.head(uri).build().unwrap();
 
@@ -637,23 +579,12 @@ async fn supports_range(
     resume: u64,
     length: Option<u64>,
 ) -> Result<bool, Error> {
-    #[cfg(feature = "isahc")]
-    let request = Request::head(uri)
-        .header("Range", range::to_string(resume, length).as_str())
-        .body(())
-        .unwrap();
-
-    #[cfg(feature = "reqwest")]
     let request = client
         .head(uri)
         .header("Range", range::to_string(resume, length).as_str())
         .build()
         .unwrap();
 
-    #[cfg(feature = "isahc")]
-    let response = client.send_async(request).await?;
-
-    #[cfg(feature = "reqwest")]
     let response = client.execute(request).await?;
 
     if response.status() == StatusCode::PARTIAL_CONTENT {
@@ -671,18 +602,6 @@ async fn supports_range(
     }
 }
 
-#[cfg(feature = "isahc")]
-fn validate(response: Response<AsyncBody>) -> Result<Response<AsyncBody>, Error> {
-    let status = response.status();
-
-    if status.is_informational() || status.is_success() {
-        Ok(response)
-    } else {
-        Err(Error::Status(status))
-    }
-}
-
-#[cfg(feature = "reqwest")]
 fn validate(response: Response) -> Result<Response, Error> {
     let status = response.status();
 
@@ -698,22 +617,6 @@ trait ResponseExt {
     fn last_modified(&self) -> Option<HttpDate>;
 }
 
-#[cfg(feature = "isahc")]
-impl<T> ResponseExt for Response<T> {
-    fn content_length(&self) -> Option<u64> {
-        let header = self.headers().get("content-length")?;
-        header.to_str().ok()?.parse::<u64>().ok()
-    }
-
-    fn last_modified(&self) -> Option<HttpDate> {
-        let header = self.headers().get("last-modified")?;
-        httpdate::parse_http_date(header.to_str().ok()?)
-            .ok()
-            .map(HttpDate::from)
-    }
-}
-
-#[cfg(feature = "reqwest")]
 impl ResponseExt for Response {
     fn content_length(&self) -> Option<u64> {
         let header = self.headers().get("content-length")?;
