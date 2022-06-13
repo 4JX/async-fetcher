@@ -70,10 +70,9 @@ use futures::{
     stream::{self, StreamExt},
 };
 
-use http::StatusCode;
 use httpdate::HttpDate;
 use numtoa::NumToA;
-use reqwest::redirect::Policy;
+use reqwest::{redirect::Policy, StatusCode};
 use reqwest::{Client, Response};
 
 use std::sync::atomic::Ordering;
@@ -128,7 +127,7 @@ pub enum Error {
     #[error("failed to rename partial to destination")]
     Rename(#[source] io::Error),
     #[error("server responded with an error: {}", _0)]
-    Status(StatusCode),
+    Status(reqwest::StatusCode),
     #[error("internal tokio join handle error")]
     TokioSpawn(#[source] tokio::task::JoinError),
 }

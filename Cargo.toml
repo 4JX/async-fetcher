@@ -18,7 +18,6 @@ edition = "2018"
 members = ["fetcher"]
 
 [dependencies]
-derive_more = "0.99.17"
 derive_setters = "0.1.5"
 derive-new = "0.5.9"
 digest = "0.10.3"
@@ -32,9 +31,7 @@ numtoa = "0.2.4"
 remem = "0.1.0"
 sha2 = "0.10.2"
 thiserror = "1.0.30"
-http = "0.2.6"
 once_cell = "1.10.0"
-tokio-stream = "0.1.8"
 ifaces = "0.1.0"
 async-shutdown = "0.1.2"
 reqwest = { version = "0.11.10", features = ["stream"] }
